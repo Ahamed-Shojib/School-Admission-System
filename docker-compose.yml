@@ -1,0 +1,76 @@
+# Start everything:   docker compose up --build
+# API automation + concurrency tests (against the running app):  docker compose run --rm api-tests
+# .NET unit/integration tests:  docker compose run --rm tests
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-school_admission}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - pgdata:/var/lib/postgresql/data # data survives `docker compose down`
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-school_admission}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build: ./backend
+    ports:
+      - "8080:8080"
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=${POSTGRES_DB:-school_admission};Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+      HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600}
+      # Admin login (only admins can add classes). Change these outside of local use.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_TOKEN_SECRET: ${ADMIN_TOKEN_SECRET:-dev-only-secret-change-me-before-real-use}
+      # true = POST /classes needs an admin token. false = the endpoint is open (UI login still works).
+      ADMIN_AUTH_REQUIRED: ${ADMIN_AUTH_REQUIRED:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    environment:
+      # Address of the backend as seen from the user's browser.
+      API_URL: ${API_URL:-http://localhost:8080}
+    depends_on:
+      - backend
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: ./backend
+      target: test
+    environment:
+      TEST_DB_CONNECTION: Host=postgres;Port=5432;Database=school_admission_test;Username=${POSTGRES_USER:-postgres};Password=${POSTGRES_PASSWORD:-postgres}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Black-box tests of the running API: tests/api/*.test.mjs (Node's built-in test runner, nothing to install).
+  api-tests:
+    profiles: ["test"]
+    image: node:22-alpine
+    working_dir: /tests
+    volumes:
+      - ./tests/api:/tests:ro
+    environment:
+      API_URL: http://backend:8080
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_AUTH_REQUIRED: ${ADMIN_AUTH_REQUIRED:-true}
+      HOLD_DURATION_SECONDS: ${HOLD_DURATION_SECONDS:-600} # the expiry tests only run when this is short (see README)
+      CONCURRENCY_REQUESTS: ${CONCURRENCY_REQUESTS:-200}
+    command: ["node", "--test", "--test-concurrency=1", "--test-reporter=spec"]
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

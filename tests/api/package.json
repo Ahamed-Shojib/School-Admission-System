@@ -1,0 +1,12 @@
+{
+  "name": "school-admission-api-tests",
+  "private": true,
+  "type": "module",
+  "description": "Black-box tests for the running API. No dependencies: uses Node's built-in test runner and fetch.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 --test-reporter=spec",
+    "test:automation": "node --test --test-reporter=spec automation.test.mjs",
+    "test:concurrency": "node --test --test-reporter=spec concurrency.test.mjs"
+  },
+  "engines": { "node": ">=20" }
+}
